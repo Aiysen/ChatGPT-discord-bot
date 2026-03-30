@@ -15,10 +15,15 @@ from discord import app_commands
 load_dotenv()
 
 
+def _env_truthy(key: str) -> bool:
+    v = os.getenv(key)
+    return v is not None and v.strip().lower() in ("1", "true", "yes", "on")
+
+
 class DiscordClient(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
-        intents.message_content = True
+        intents.message_content = _env_truthy("DISCORD_MESSAGE_CONTENT_INTENT")
         super().__init__(intents=intents)
         
         self.tree = app_commands.CommandTree(self)
@@ -52,6 +57,11 @@ class DiscordClient(discord.Client):
         self.isPrivate = False
         self.is_replying_all = os.getenv("REPLYING_ALL", "False") == "True"
         self.replying_all_discord_channel_id = os.getenv("REPLYING_ALL_DISCORD_CHANNEL_ID")
+        if self.is_replying_all and not intents.message_content:
+            logger.warning(
+                "REPLYING_ALL без DISCORD_MESSAGE_CONTENT_INTENT: включите Message Content Intent "
+                "в портале Discord и задайте DISCORD_MESSAGE_CONTENT_INTENT=true"
+            )
         
         # Load system prompt
         config_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
