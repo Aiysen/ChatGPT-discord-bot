@@ -19,6 +19,10 @@
 * **Rename the file `.env.example` to `.env`**
 * Running `pip3 install -r requirements.txt` to install the required dependencies
 * Optional: API keys for premium providers (OpenAI, Claude, Gemini, Grok)
+
+## Railway Deployment
+
+For Railway + Discord setup instructions, see `docs/railway-discord-setup.md`.
 ---
 ## Step 1: Create a Discord bot
 
