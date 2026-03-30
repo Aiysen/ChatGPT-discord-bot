@@ -45,7 +45,6 @@ class PromptEnhancer:
         response = await self.client.chat.completions.create(
             model=self.model,
             temperature=0.35,
-            response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": self._system_prompt()},
                 {"role": "user", "content": content},

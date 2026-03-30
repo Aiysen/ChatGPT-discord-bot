@@ -32,7 +32,6 @@ class ImageGenerator:
             n=safe_count,
             size=size,
             quality=quality,
-            response_format="b64_json",
         )
 
         result: List[GeneratedImage] = []
