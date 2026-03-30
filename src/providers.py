@@ -1,7 +1,7 @@
 import os
 import logging
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -68,26 +68,9 @@ class FreeProvider(BaseProvider):
     
     def __init__(self):
         super().__init__()
-        
-        # ONLY use providers that work 100% without ANY authentication
-        # These have been tested and verified to work in 2025
-        self.working_providers = [
-            {
-                'provider': g4f.Provider.Blackbox,
-                'models': ['blackboxai'],
-                'name': 'Blackbox'
-            },
-            {
-                'provider': g4f.Provider.Chatai, 
-                'models': ['gpt-3.5-turbo', 'gpt-4'],
-                'name': 'Chatai'
-            },
-            {
-                'provider': g4f.Provider.CohereForAI_C4AI_Command,
-                'models': ['command-r-plus', 'command-r'],
-                'name': 'CohereForAI'
-            }
-        ]
+        self.working_providers = self._build_working_providers()
+        if not self.working_providers:
+            raise RuntimeError("No compatible auth-free g4f providers are available in this environment")
         
         # Create provider list for RetryProvider
         providers_list = [p['provider'] for p in self.working_providers]
@@ -103,6 +86,35 @@ class FreeProvider(BaseProvider):
         
         # Track current provider for better error handling
         self.current_provider_index = 0
+
+    def _build_working_providers(self) -> List[Dict[str, Any]]:
+        """Resolve only providers that exist in the installed g4f version."""
+        provider_candidates: List[Tuple[str, List[str], str]] = [
+            ("Blackbox", ["blackboxai"], "Blackbox"),
+            ("Chatai", ["gpt-3.5-turbo", "gpt-4"], "Chatai"),
+            ("CohereForAI_C4AI_Command", ["command-r-plus", "command-r"], "CohereForAI"),
+        ]
+        working_providers: List[Dict[str, Any]] = []
+
+        for provider_attr, models, display_name in provider_candidates:
+            provider_class = getattr(g4f.Provider, provider_attr, None)
+            if provider_class is None:
+                logger.warning(
+                    "Skipping unavailable g4f provider '%s' in version %s",
+                    provider_attr,
+                    getattr(g4f, "__version__", "unknown"),
+                )
+                continue
+
+            working_providers.append(
+                {
+                    "provider": provider_class,
+                    "models": models,
+                    "name": display_name,
+                }
+            )
+
+        return working_providers
         
     async def chat_completion(self, messages: List[Dict[str, str]], model: str, **kwargs) -> str:
         """Generate chat completion with robust fallback system"""
@@ -195,19 +207,23 @@ class FreeProvider(BaseProvider):
             raise
     
     def get_available_models(self) -> List[ModelInfo]:
-        """Return only VERIFIED working models - no dead models!"""
-        models = [
-            # VERIFIED WORKING models from tested providers
-            ModelInfo("blackboxai", ProviderType.FREE, "Blackbox AI - reliable free model"),
-            ModelInfo("gpt-3.5-turbo", ProviderType.FREE, "GPT-3.5 via Chatai - tested working"),
-            ModelInfo("gpt-4", ProviderType.FREE, "GPT-4 via Chatai - tested working"),
-            ModelInfo("command-r-plus", ProviderType.FREE, "Cohere Command R+ - tested working"),
-            ModelInfo("command-r", ProviderType.FREE, "Cohere Command R - tested working"),
-        ]
-        
-        # Note: Removed all dead models like gpt-4o-mini, llama-3.1-70b, claude-3-haiku
-        # These were causing failures. Only include models that actually work.
-        
+        """Return models only from providers available in the installed g4f version."""
+        models: List[ModelInfo] = []
+        seen_models = set()
+
+        for provider_info in self.working_providers:
+            for model_name in provider_info["models"]:
+                if model_name in seen_models:
+                    continue
+                seen_models.add(model_name)
+                models.append(
+                    ModelInfo(
+                        model_name,
+                        ProviderType.FREE,
+                        f"{provider_info['name']} free model",
+                    )
+                )
+
         return models
     
     def supports_image_generation(self) -> bool:
@@ -443,8 +459,11 @@ class ProviderManager:
     
     def __init__(self):
         self.providers: Dict[ProviderType, BaseProvider] = {}
-        self.current_provider = ProviderType.FREE
         self._initialize_providers()
+        self.current_provider = (
+            ProviderType.FREE if ProviderType.FREE in self.providers
+            else next(iter(self.providers), ProviderType.FREE)
+        )
         
     def _validate_api_key(self, api_key: str, provider_name: str, pattern: Optional[str] = None) -> bool:
         """Validate API key format"""
@@ -464,9 +483,11 @@ class ProviderManager:
     
     def _initialize_providers(self):
         """Initialize available providers based on API keys"""
-        # Always add free provider
-        self.providers[ProviderType.FREE] = FreeProvider()
-        logger.info("Initialized free provider")
+        try:
+            self.providers[ProviderType.FREE] = FreeProvider()
+            logger.info("Initialized free provider")
+        except Exception as e:
+            logger.warning(f"Free provider unavailable: {e}")
         
         # API key configurations: (env_var, provider_type, provider_class, validation_pattern)
         api_configs = [

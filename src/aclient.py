@@ -31,8 +31,11 @@ class DiscordClient(discord.Client):
         try:
             self.provider_manager.set_current_provider(ProviderType(default_provider))
         except ValueError:
-            logger.warning(f"Invalid default provider {default_provider}, using free")
-            self.provider_manager.set_current_provider(ProviderType.FREE)
+            fallback_provider = self._get_startup_provider_fallback()
+            logger.warning(
+                f"Default provider {default_provider} is unavailable, using {fallback_provider.value}"
+            )
+            self.provider_manager.set_current_provider(fallback_provider)
         
         self.current_model = os.getenv("DEFAULT_MODEL", "auto")
         
@@ -62,6 +65,17 @@ class DiscordClient(discord.Client):
         
         # Message queue for rate limiting
         self.message_queue = asyncio.Queue()
+
+    def _get_startup_provider_fallback(self) -> ProviderType:
+        """Return the best provider available for startup."""
+        available_providers = self.provider_manager.get_available_providers()
+        if not available_providers:
+            raise RuntimeError("No AI providers are available. Configure at least one provider.")
+
+        if ProviderType.FREE in available_providers:
+            return ProviderType.FREE
+
+        return available_providers[0]
     
     async def process_messages(self):
         """Process queued messages"""
@@ -186,8 +200,13 @@ class DiscordClient(discord.Client):
         provider = self.provider_manager.get_provider()
         
         if not provider.supports_image_generation():
-            # Fallback to free provider for image generation
-            provider = self.provider_manager.get_provider(ProviderType.FREE)
+            for provider_type in self.provider_manager.get_available_providers():
+                candidate = self.provider_manager.get_provider(provider_type)
+                if candidate.supports_image_generation():
+                    provider = candidate
+                    break
+            else:
+                raise NotImplementedError("No configured provider currently supports image generation")
         
         return await provider.generate_image(prompt, model)
     
