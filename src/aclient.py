@@ -267,6 +267,21 @@ class DiscordClient(discord.Client):
                 raise NotImplementedError("No configured provider currently supports image generation")
         
         return await provider.generate_image(prompt, model)
+
+    async def edit_image(self, image_bytes: bytes, prompt: str, model: Optional[str] = None) -> bytes:
+        """Edit image using a provider that supports image editing"""
+        provider = self.provider_manager.get_provider()
+
+        if not provider.supports_image_editing():
+            for provider_type in self.provider_manager.get_available_providers():
+                candidate = self.provider_manager.get_provider(provider_type)
+                if candidate.supports_image_editing():
+                    provider = candidate
+                    break
+            else:
+                raise NotImplementedError("No configured provider currently supports image editing")
+
+        return await provider.edit_image(image_bytes=image_bytes, prompt=prompt, model=model)
     
     def reset_conversation_history(self):
         """Reset conversation and persona"""

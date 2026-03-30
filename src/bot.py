@@ -1,5 +1,6 @@
 import os
 import asyncio
+import io
 import discord
 from discord import app_commands
 from typing import Optional
@@ -209,6 +210,59 @@ def run_discord_bot():
                 f"❌ Failed to generate image: {str(e)}"
             )
 
+    @discordClient.tree.command(name="editimage", description="Edit an uploaded image with AI")
+    async def editimage(interaction: discord.Interaction, image: discord.Attachment, *, prompt: str):
+        if len(prompt) > 500:
+            await interaction.response.send_message(
+                "❌ Prompt too long (max 500 characters)",
+                ephemeral=True
+            )
+            return
+
+        prompt = prompt.strip()
+        if not prompt:
+            await interaction.response.send_message(
+                "❌ Please provide a prompt",
+                ephemeral=True
+            )
+            return
+
+        if image.content_type and not image.content_type.startswith("image/"):
+            await interaction.response.send_message(
+                "❌ Attachment must be an image file",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+
+        try:
+            image_bytes = await image.read()
+            if not image_bytes:
+                await interaction.followup.send("❌ Uploaded image is empty")
+                return
+
+            edited_image_bytes = await discordClient.edit_image(image_bytes=image_bytes, prompt=prompt)
+            discord_file = discord.File(io.BytesIO(edited_image_bytes), filename="edited-image.png")
+
+            embed = discord.Embed(
+                title="🖼️ Edited Image",
+                description=f"**Prompt:** {prompt}",
+                color=discord.Color.green()
+            )
+            embed.set_image(url="attachment://edited-image.png")
+
+            await interaction.followup.send(embed=embed, file=discord_file)
+        except NotImplementedError:
+            await interaction.followup.send(
+                "❌ Current providers do not support image editing. Configure OpenAI and select it via `/provider`."
+            )
+        except Exception as e:
+            logger.error(f"Image edit error: {e}")
+            await interaction.followup.send(
+                f"❌ Failed to edit image: {str(e)}"
+            )
+
     @discordClient.tree.command(name="switchpersona", description="Switch AI personality")
     async def switchpersona(interaction: discord.Interaction, persona: str):
         user_id = str(interaction.user.id)
@@ -315,7 +369,8 @@ def run_discord_bot():
                 ("/provider", "Switch AI provider and model interactively")
             ]),
             ("🎨 **Image Generation**", [
-                ("/draw [prompt]", "Generate an image from text")
+                ("/draw [prompt]", "Generate an image from text"),
+                ("/editimage [image] [prompt]", "Edit an uploaded image using prompt instructions")
             ]),
             ("🎭 **Personas**", [
                 ("/switchpersona [name]", "Change AI personality"),

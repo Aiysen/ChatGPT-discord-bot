@@ -1,6 +1,7 @@
 import os
 import logging
 import re
+import base64
 from typing import Dict, List, Optional, Any, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -61,6 +62,10 @@ class BaseProvider(ABC):
     async def generate_image(self, prompt: str, model: Optional[str] = None, **kwargs) -> str:
         """Generate image from prompt"""
         pass
+
+    async def edit_image(self, image_bytes: bytes, prompt: str, model: Optional[str] = None, **kwargs) -> bytes:
+        """Edit an existing image"""
+        raise NotImplementedError("Image editing is not supported by this provider")
     
     @abstractmethod
     def get_available_models(self) -> List[ModelInfo]:
@@ -71,6 +76,10 @@ class BaseProvider(ABC):
     def supports_image_generation(self) -> bool:
         """Check if provider supports image generation"""
         pass
+
+    def supports_image_editing(self) -> bool:
+        """Check if provider supports image editing"""
+        return False
 
 
 class FreeProvider(BaseProvider):
@@ -292,6 +301,37 @@ class OpenAIProvider(BaseProvider):
         except Exception as e:
             logger.error(f"OpenAI image generation error: {e}")
             raise
+
+    async def edit_image(self, image_bytes: bytes, prompt: str, model: Optional[str] = None, **kwargs) -> bytes:
+        try:
+            response = await self.client.images.edit(
+                model=model or "gpt-image-1",
+                image=("input.png", image_bytes, "image/png"),
+                prompt=prompt,
+                size=kwargs.get("size", "1024x1024"),
+                n=1,
+                response_format="b64_json",
+            )
+
+            if not response.data:
+                raise RuntimeError("OpenAI returned empty image edit response")
+
+            image_data = response.data[0]
+            if getattr(image_data, "b64_json", None):
+                return base64.b64decode(image_data.b64_json)
+
+            image_url = getattr(image_data, "url", None)
+            if image_url:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(image_url) as url_response:
+                        if url_response.status != 200:
+                            raise RuntimeError(f"Failed to download edited image: HTTP {url_response.status}")
+                        return await url_response.read()
+
+            raise RuntimeError("OpenAI did not return edited image content")
+        except Exception as e:
+            logger.error(f"OpenAI image editing error: {e}")
+            raise
     
     def get_available_models(self) -> List[ModelInfo]:
         return [
@@ -304,6 +344,9 @@ class OpenAIProvider(BaseProvider):
         ]
     
     def supports_image_generation(self) -> bool:
+        return True
+
+    def supports_image_editing(self) -> bool:
         return True
 
 
