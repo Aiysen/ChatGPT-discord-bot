@@ -30,6 +30,25 @@ def _env_truthy(key: str) -> bool:
     return v is not None and v.lower() in ("1", "true", "yes", "on")
 
 
+def _looks_like_openai_quota_error(error_text: str) -> bool:
+    text = (error_text or "").lower()
+    return (
+        "insufficient_quota" in text
+        or "exceeded your current quota" in text
+        or "billing_hard_limit_reached" in text
+    )
+
+
+def _looks_like_openai_auth_error(error_text: str) -> bool:
+    text = (error_text or "").lower()
+    return (
+        "invalid_api_key" in text
+        or "incorrect api key" in text
+        or "no api key provided" in text
+        or "authenticationerror" in text
+    )
+
+
 class DiscordClient(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -192,6 +211,25 @@ class DiscordClient(discord.Client):
             
         except Exception as e:
             logger.error(f"Provider error: {e}")
+            error_text = str(e)
+
+            if self.provider_manager.current_provider == ProviderType.OPENAI:
+                if _looks_like_openai_quota_error(error_text):
+                    error_response = (
+                        "❌ OpenAI API: превышена квота (`insufficient_quota`). "
+                        "Проверьте billing/лимиты и пополните баланс в OpenAI Platform."
+                    )
+                    self.conversation_history.append({'role': 'assistant', 'content': error_response})
+                    return error_response
+
+                if _looks_like_openai_auth_error(error_text):
+                    error_response = (
+                        "❌ OpenAI API: проблема с ключом доступа. "
+                        "Проверьте `OPENAI_KEY` и что ключ активен в нужном проекте."
+                    )
+                    self.conversation_history.append({'role': 'assistant', 'content': error_response})
+                    return error_response
+
             # Try fallback to free provider
             if self.provider_manager.current_provider != ProviderType.FREE:
                 logger.info("Falling back to free provider")
