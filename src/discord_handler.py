@@ -141,6 +141,7 @@ class DiscordImageHandler:
         self._worker_count = int(os.getenv("IMAGE_CONCURRENCY", "2"))
         self.task_timeout_seconds = int(os.getenv("IMAGE_TASK_TIMEOUT_SECONDS", "90"))
         self.default_image_count = int(os.getenv("IMAGINE_IMAGE_COUNT", "2"))
+        self.default_edit_image_count = int(os.getenv("EDIT_IMAGE_COUNT", "1"))
         self._task_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
 
@@ -247,6 +248,108 @@ class DiscordImageHandler:
             logger.exception(f"/imagine failed: {exc}")
             await interaction.followup.send(f"❌ Ошибка генерации: {exc}")
 
+    async def handle_draw(self, interaction: discord.Interaction, prompt: str):
+        clean_prompt = (prompt or "").strip()
+        if not clean_prompt:
+            await interaction.response.send_message("❌ Укажите prompt.", ephemeral=True)
+            return
+        if len(clean_prompt) > 1000:
+            await interaction.response.send_message("❌ Prompt слишком длинный (макс. 1000 символов).", ephemeral=True)
+            return
+
+        allowed, error_text = self.rate_limiter.is_allowed(interaction.user.id)
+        if not allowed:
+            await interaction.response.send_message(f"❌ {error_text}", ephemeral=True)
+            return
+
+        await interaction.response.defer(thinking=True)
+        try:
+            images = await self.run_image_generation(clean_prompt)
+            files = self.images_to_discord_files(images)
+
+            self.history_store.save(
+                GenerationRecord(
+                    user_id=interaction.user.id,
+                    username=str(interaction.user),
+                    original_prompt=clean_prompt,
+                    final_prompt=clean_prompt,
+                    variations=[clean_prompt],
+                    chosen_prompt=clean_prompt,
+                    prompt_model="none",
+                    image_model=self.image_generator.model,
+                    image_count=len(images),
+                    had_input_image=False,
+                )
+            )
+
+            await interaction.followup.send(
+                content=(
+                    f"Сгенерировано без улучшения промта:\n`{clean_prompt[:700]}`\n\n"
+                    f"Модель генерации: `{self.image_generator.model}`"
+                ),
+                files=files,
+            )
+        except asyncio.TimeoutError:
+            await interaction.followup.send("❌ Таймаут обработки запроса. Попробуйте снова.")
+        except Exception as exc:
+            logger.exception(f"/draw failed: {exc}")
+            await interaction.followup.send(f"❌ Ошибка генерации: {exc}")
+
+    async def handle_editimage(self, interaction: discord.Interaction, image: discord.Attachment, prompt: str):
+        clean_prompt = (prompt or "").strip()
+        if not clean_prompt:
+            await interaction.response.send_message("❌ Укажите prompt.", ephemeral=True)
+            return
+        if len(clean_prompt) > 1000:
+            await interaction.response.send_message("❌ Prompt слишком длинный (макс. 1000 символов).", ephemeral=True)
+            return
+        if image.content_type and not image.content_type.startswith("image/"):
+            await interaction.response.send_message("❌ Attachment должен быть изображением.", ephemeral=True)
+            return
+
+        allowed, error_text = self.rate_limiter.is_allowed(interaction.user.id)
+        if not allowed:
+            await interaction.response.send_message(f"❌ {error_text}", ephemeral=True)
+            return
+
+        image_bytes = await image.read()
+        if not image_bytes:
+            await interaction.response.send_message("❌ Пустой файл изображения.", ephemeral=True)
+            return
+
+        await interaction.response.defer(thinking=True)
+        try:
+            images = await self.run_image_edit(clean_prompt, image_bytes)
+            files = self.images_to_discord_files(images)
+
+            self.history_store.save(
+                GenerationRecord(
+                    user_id=interaction.user.id,
+                    username=str(interaction.user),
+                    original_prompt=clean_prompt,
+                    final_prompt=clean_prompt,
+                    variations=[clean_prompt],
+                    chosen_prompt=clean_prompt,
+                    prompt_model="none",
+                    image_model=self.image_generator.edit_model,
+                    image_count=len(images),
+                    had_input_image=True,
+                )
+            )
+
+            await interaction.followup.send(
+                content=(
+                    f"Изображение отредактировано по вашему prompt:\n`{clean_prompt[:700]}`\n\n"
+                    f"Модель редактирования: `{self.image_generator.edit_model}`"
+                ),
+                files=files,
+            )
+        except asyncio.TimeoutError:
+            await interaction.followup.send("❌ Таймаут редактирования изображения. Попробуйте снова.")
+        except Exception as exc:
+            logger.exception(f"/editimage failed: {exc}")
+            await interaction.followup.send(f"❌ Ошибка редактирования изображения: {exc}")
+
     async def handle_variations(self, interaction: discord.Interaction):
         record = self.history_store.get_last(interaction.user.id)
         if not record:
@@ -323,6 +426,16 @@ class DiscordImageHandler:
             return await self.image_generator.generate_images(
                 prompt=prompt,
                 image_count=self.default_image_count,
+            )
+
+        return await self._run_in_queue(_task)
+
+    async def run_image_edit(self, prompt: str, image_bytes: bytes) -> List[GeneratedImage]:
+        async def _task():
+            return await self.image_generator.edit_image(
+                image_bytes=image_bytes,
+                prompt=prompt,
+                image_count=self.default_edit_image_count,
             )
 
         return await self._run_in_queue(_task)

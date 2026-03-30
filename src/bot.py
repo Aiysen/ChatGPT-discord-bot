@@ -178,7 +178,7 @@ def run_discord_bot():
             ephemeral=True
         )
 
-    @discordClient.tree.command(name="draw", description="Legacy alias for /imagine")
+    @discordClient.tree.command(name="draw", description="Генерация по исходному промту без улучшения")
     async def draw(interaction: discord.Interaction, *, prompt: str):
         if not image_handler:
             await interaction.response.send_message(
@@ -186,9 +186,9 @@ def run_discord_bot():
                 ephemeral=True
             )
             return
-        await image_handler.handle_imagine(interaction=interaction, prompt=prompt)
+        await image_handler.handle_draw(interaction=interaction, prompt=prompt)
 
-    @discordClient.tree.command(name="editimage", description="Legacy alias for /imagine with image")
+    @discordClient.tree.command(name="editimage", description="Редактирование присланного изображения (DALL-E 2)")
     async def editimage(interaction: discord.Interaction, image: discord.Attachment, *, prompt: str):
         if not image_handler:
             await interaction.response.send_message(
@@ -196,7 +196,7 @@ def run_discord_bot():
                 ephemeral=True
             )
             return
-        await image_handler.handle_imagine(interaction=interaction, prompt=prompt, image=image)
+        await image_handler.handle_editimage(interaction=interaction, image=image, prompt=prompt)
 
     @discordClient.tree.command(name="switchpersona", description="Switch AI personality")
     async def switchpersona(interaction: discord.Interaction, persona: str):
@@ -286,11 +286,11 @@ def run_discord_bot():
             ephemeral=False
         )
 
-    @discordClient.tree.command(name="help", description="Show all available commands")
+    @discordClient.tree.command(name="help", description="Показать все доступные команды")
     async def help(interaction: discord.Interaction):
         embed = discord.Embed(
-            title="🤖 AI Discord Bot - Help",
-            description="Here are all available commands:",
+            title="🤖 AI Discord Bot - Помощь",
+            description="Доступные команды и режимы работы:",
             color=discord.Color.blue()
         )
         
@@ -303,20 +303,23 @@ def run_discord_bot():
             ("🤖 **Provider & Model**", [
                 ("/provider", "Switch AI provider and model interactively")
             ]),
-            ("🎨 **Image Generation**", [
-                ("/imagine [prompt] [image?]", "Enhance prompt and generate images"),
-                ("/variations", "Generate more variants from your latest result"),
-                ("/draw [prompt]", "Legacy alias for /imagine"),
-                ("/editimage [image] [prompt]", "Legacy alias for /imagine with image")
+            ("🎨 **Генерация изображений**", [
+                ("/imagine [prompt] [image?] [style_preset?]", "Сначала улучшает prompt, затем генерирует изображение"),
+                ("/draw [prompt]", "Генерирует напрямую по вашему prompt без улучшения"),
+                ("/editimage [image] [prompt]", "Редактирует именно присланное изображение через DALL-E 2"),
+                ("/variations", "Создаёт новые вариации на базе последнего результата")
             ]),
             ("🎭 **Personas**", [
                 ("/switchpersona [name]", "Change AI personality"),
                 ("Available", "standard, creative, technical, casual"),
                 ("Admin Only", "jailbreak-v1, jailbreak-v2, jailbreak-v3 (restricted)")
             ]),
-            ("⚙️ **Settings**", [
+            ("⚙️ **Режимы**", [
+                ("Важно", "/imagine использует улучшение prompt, /draw не использует улучшение, /editimage изменяет входное изображение"),
+            ]),
+            ("⚙️ **Настройки**", [
                 ("/private", "Toggle private/public responses"),
-                ("/help", "Show this help message")
+                ("/help", "Показать это сообщение")
             ])
         ]
         
