@@ -6,6 +6,7 @@ from typing import List, Optional
 
 import aiohttp
 from openai import AsyncOpenAI
+from PIL import Image
 
 
 @dataclass
@@ -63,7 +64,8 @@ class ImageGenerator:
         size: str = "1024x1024",
     ) -> List[GeneratedImage]:
         safe_count = max(1, min(image_count, 4))
-        image_file = io.BytesIO(image_bytes)
+        prepared_image_bytes = self._prepare_image_for_edit(image_bytes)
+        image_file = io.BytesIO(prepared_image_bytes)
         image_file.name = "input.png"
 
         response = await self.client.images.edit(
@@ -99,3 +101,14 @@ class ImageGenerator:
                 if response.status != 200:
                     raise RuntimeError(f"Failed to download image: HTTP {response.status}")
                 return await response.read()
+
+    def _prepare_image_for_edit(self, image_bytes: bytes) -> bytes:
+        """Normalize image mode for OpenAI edit API (expects alpha or grayscale modes)."""
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            if source.mode in {"RGBA", "LA", "L"} and source.format == "PNG":
+                return image_bytes
+
+            normalized = source.convert("RGBA")
+            output = io.BytesIO()
+            normalized.save(output, format="PNG")
+            return output.getvalue()
