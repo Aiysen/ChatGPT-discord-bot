@@ -3,6 +3,16 @@ import logging
 import logging.handlers
 
 
+def _env_truthy(key: str) -> bool:
+    value = os.getenv(key)
+    if value is None:
+        return False
+    normalized = value.strip()
+    if len(normalized) >= 2 and normalized[0] == normalized[-1] and normalized[0] in ("'", '"'):
+        normalized = normalized[1:-1].strip()
+    return normalized.lower() in ("1", "true", "yes", "on")
+
+
 class CustomFormatter(logging.Formatter):
     LEVEL_COLORS = [
         (logging.DEBUG, '\x1b[40;1m'),
@@ -52,7 +62,7 @@ def setup_logger(module_name:str) -> logging.Logger:
     # Add console handler to logger
     logger.addHandler(console_handler)
 
-    if os.getenv("LOGGING") == "True":  # Check if logging is enabled
+    if _env_truthy("LOGGING"):
         # Use /tmp for Docker read-only filesystem compatibility
         log_dir = "/tmp" if os.path.exists("/tmp") else os.path.abspath(f"{__file__}/../../")
         log_name = 'chatgpt_discord_bot.log'

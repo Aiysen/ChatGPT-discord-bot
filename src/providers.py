@@ -18,6 +18,16 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 
+def _env_value(key: str) -> Optional[str]:
+    raw = os.getenv(key)
+    if raw is None:
+        return None
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value or None
+
+
 class ProviderType(Enum):
     FREE = "free"
     OPENAI = "openai"
@@ -145,6 +155,11 @@ class FreeProvider(BaseProvider):
                 
                 if response and response.choices and response.choices[0].message.content:
                     result = response.choices[0].message.content
+                    if self._looks_like_auth_error(result):
+                        logger.warning(
+                            f"❌ {provider_info['name']} returned auth-required payload, trying next provider"
+                        )
+                        continue
                     logger.info(f"✅ Success with {provider_info['name']} + {provider_model}")
                     return result
                 else:
@@ -161,6 +176,18 @@ class FreeProvider(BaseProvider):
         
         # If all providers fail, raise a meaningful error
         raise Exception("All free providers failed. The service may be temporarily unavailable.")
+    
+    def _looks_like_auth_error(self, text: str) -> bool:
+        if not text:
+            return False
+        lowered = text.lower()
+        auth_markers = (
+            "authentication error",
+            "no api key passed in",
+            '"type":"error"',
+            '"type": "error"',
+        )
+        return any(marker in lowered for marker in auth_markers)
     
     def _select_model(self, model: Optional[str]) -> str:
         """Select the best available model"""
@@ -498,7 +525,7 @@ class ProviderManager:
         ]
         
         for env_key, provider_type, provider_class, pattern in api_configs:
-            api_key = os.getenv(env_key)
+            api_key = _env_value(env_key)
             if api_key:
                 logger.info(f"Found {env_key} with length {len(api_key)}, prefix: {api_key[:10]}...")
                 if self._validate_api_key(api_key, provider_type.value, pattern):

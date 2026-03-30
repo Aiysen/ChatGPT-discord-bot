@@ -15,9 +15,19 @@ from discord import app_commands
 load_dotenv()
 
 
+def _env_value(key: str, default: Optional[str] = None) -> Optional[str]:
+    raw = os.getenv(key)
+    if raw is None:
+        return default
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value or default
+
+
 def _env_truthy(key: str) -> bool:
-    v = os.getenv(key)
-    return v is not None and v.strip().lower() in ("1", "true", "yes", "on")
+    v = _env_value(key)
+    return v is not None and v.lower() in ("1", "true", "yes", "on")
 
 
 class DiscordClient(discord.Client):
@@ -32,7 +42,7 @@ class DiscordClient(discord.Client):
         self.provider_manager = ProviderManager()
         
         # Set default provider and model
-        default_provider = os.getenv("DEFAULT_PROVIDER", "free")
+        default_provider = _env_value("DEFAULT_PROVIDER", "free")
         try:
             self.provider_manager.set_current_provider(ProviderType(default_provider))
         except ValueError:
@@ -42,7 +52,7 @@ class DiscordClient(discord.Client):
             )
             self.provider_manager.set_current_provider(fallback_provider)
         
-        self.current_model = os.getenv("DEFAULT_MODEL", "auto")
+        self.current_model = _env_value("DEFAULT_MODEL", "auto")
         
         # Conversation management
         self.conversation_history = []
@@ -55,8 +65,8 @@ class DiscordClient(discord.Client):
             name="/chat | /help | /provider"
         )
         self.isPrivate = False
-        self.is_replying_all = os.getenv("REPLYING_ALL", "False") == "True"
-        self.replying_all_discord_channel_id = os.getenv("REPLYING_ALL_DISCORD_CHANNEL_ID")
+        self.is_replying_all = _env_truthy("REPLYING_ALL")
+        self.replying_all_discord_channel_id = _env_value("REPLYING_ALL_DISCORD_CHANNEL_ID")
         if self.is_replying_all and not intents.message_content:
             logger.warning(
                 "REPLYING_ALL без DISCORD_MESSAGE_CONTENT_INTENT: включите Message Content Intent "
@@ -128,7 +138,7 @@ class DiscordClient(discord.Client):
     
     async def send_start_prompt(self):
         """Send initial system prompt"""
-        discord_channel_id = os.getenv("DISCORD_CHANNEL_ID")
+        discord_channel_id = _env_value("DISCORD_CHANNEL_ID")
         try:
             if self.starting_prompt and discord_channel_id:
                 channel = self.get_channel(int(discord_channel_id))
