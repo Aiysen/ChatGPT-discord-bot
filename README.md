@@ -138,7 +138,7 @@ Behavior:
 * `/imagine prompt:<text> [image]` - Enhance prompt and generate images
 * `/variations` - Generate more variants from your latest image result
 * `/draw [prompt]` - Legacy alias for `/imagine`
-* `/editimage [image] [prompt]` - Legacy alias for `/imagine` with image
+* `/editimage [image] [prompt]` - Edit attached image directly (image-to-image, multiple variants)
 * `/reset` - Clear conversation history
 * `/help` - Display all available commands
 

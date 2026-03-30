@@ -188,7 +188,7 @@ def run_discord_bot():
             return
         await image_handler.handle_draw(interaction=interaction, prompt=prompt)
 
-    @discordClient.tree.command(name="editimage", description="Редактирование присланного изображения (DALL-E 2)")
+    @discordClient.tree.command(name="editimage", description="Редактирование присланного изображения (image-to-image)")
     async def editimage(interaction: discord.Interaction, image: discord.Attachment, *, prompt: str):
         if not image_handler:
             await interaction.response.send_message(
@@ -306,7 +306,7 @@ def run_discord_bot():
             ("🎨 **Генерация изображений**", [
                 ("/imagine [prompt] [image?] [style_preset?]", "Сначала улучшает prompt, затем генерирует изображение"),
                 ("/draw [prompt]", "Генерирует напрямую по вашему prompt без улучшения"),
-                ("/editimage [image] [prompt]", "Редактирует именно присланное изображение через DALL-E 2"),
+                ("/editimage [image] [prompt]", "Редактирует именно присланное изображение через модель image-edit"),
                 ("/variations", "Создаёт новые вариации на базе последнего результата")
             ]),
             ("🎭 **Personas**", [

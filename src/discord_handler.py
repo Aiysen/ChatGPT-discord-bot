@@ -141,7 +141,7 @@ class DiscordImageHandler:
         self._worker_count = int(os.getenv("IMAGE_CONCURRENCY", "2"))
         self.task_timeout_seconds = int(os.getenv("IMAGE_TASK_TIMEOUT_SECONDS", "90"))
         self.default_image_count = int(os.getenv("IMAGINE_IMAGE_COUNT", "2"))
-        self.default_edit_image_count = int(os.getenv("EDIT_IMAGE_COUNT", "1"))
+        self.default_edit_image_count = int(os.getenv("EDIT_IMAGE_COUNT", "4"))
         self._task_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
 
@@ -319,7 +319,8 @@ class DiscordImageHandler:
 
         await interaction.response.defer(thinking=True)
         try:
-            images = await self.run_image_edit(clean_prompt, image_bytes)
+            effective_prompt = self._build_edit_prompt(clean_prompt)
+            images = await self.run_image_edit(effective_prompt, image_bytes)
             files = self.images_to_discord_files(images)
 
             self.history_store.save(
@@ -327,9 +328,9 @@ class DiscordImageHandler:
                     user_id=interaction.user.id,
                     username=str(interaction.user),
                     original_prompt=clean_prompt,
-                    final_prompt=clean_prompt,
-                    variations=[clean_prompt],
-                    chosen_prompt=clean_prompt,
+                    final_prompt=effective_prompt,
+                    variations=[clean_prompt, effective_prompt],
+                    chosen_prompt=effective_prompt,
                     prompt_model="none",
                     image_model=self.image_generator.edit_model,
                     image_count=len(images),
@@ -340,6 +341,7 @@ class DiscordImageHandler:
             await interaction.followup.send(
                 content=(
                     f"Изображение отредактировано по вашему prompt:\n`{clean_prompt[:700]}`\n\n"
+                    f"Вариантов: `{len(images)}`\n"
                     f"Модель редактирования: `{self.image_generator.edit_model}`"
                 ),
                 files=files,
@@ -439,6 +441,17 @@ class DiscordImageHandler:
             )
 
         return await self._run_in_queue(_task)
+
+    def _build_edit_prompt(self, user_prompt: str) -> str:
+        return (
+            f"{user_prompt.strip()}\n\n"
+            "Strict edit rules:\n"
+            "- Apply visible edits exactly as requested.\n"
+            "- Never return an unchanged copy of the input image.\n"
+            "- Keep composition, shape, geometry, and object identity unchanged unless explicitly requested.\n"
+            "- If the request is about colors/palette, change only colors and do not use the original palette.\n"
+            "- Do not add text, logos, or new objects."
+        )
 
     def images_to_discord_files(self, images: List[GeneratedImage]) -> List[discord.File]:
         files: List[discord.File] = []

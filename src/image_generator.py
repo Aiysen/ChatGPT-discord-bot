@@ -19,7 +19,7 @@ class ImageGenerator:
     def __init__(self, api_key: str, model: Optional[str] = None):
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model or os.getenv("IMAGE_GENERATION_MODEL", "gpt-image-1")
-        self.edit_model = os.getenv("IMAGE_EDIT_MODEL", "dall-e-2")
+        self.edit_model = os.getenv("IMAGE_EDIT_MODEL", "gpt-image-1")
 
     async def generate_images(
         self,
