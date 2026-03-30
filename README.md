@@ -98,21 +98,19 @@ Use `/provider` command in Discord to switch between available providers
 
 <img src="https://i.imgur.com/Eo1ZzKk.png" width="300" alt="image">
 
-Image generation is now integrated with the provider system:
+Image pipeline now works in 2 stages:
+1. Prompt enhancement via chat model (`gpt-4.1` by default)
+2. Image generation via modern model (`gpt-image-1` by default)
 
-### OpenAI DALL-E 3
-- Requires OpenAI API key
-- High-quality image generation
-- Use `/draw [prompt] openai`
+Supported flows:
+- Text-to-image: `/imagine prompt:<text>`
+- Image-to-image: `/imagine prompt:<text>` + attachment image
+- Iteration: `/variations` (build from your last generated result)
 
-### Google Gemini
-- Requires Gemini API key  
-- Free tier available
-- Use `/draw [prompt] gemini`
-
-### Fallback Options
-- If premium providers are unavailable, the bot will attempt to use free alternatives
-- Image generation capabilities vary by provider availability
+Behavior:
+- Prompt is always enhanced before generation
+- If image is attached, enhancer preserves composition and modifies only requested parts
+- Bot returns multiple images and prompt alternatives in a selector UI
 
 ## Optional: Setup system prompt
 
@@ -137,7 +135,10 @@ Image generation is now integrated with the provider system:
 ### Core Commands
 * `/chat [message]` - Chat with the current AI provider
 * `/provider` - Switch between AI providers (Free, OpenAI, Claude, Gemini, Grok)
-* `/draw [prompt] [model]` - Generate images with specified provider
+* `/imagine prompt:<text> [image]` - Enhance prompt and generate images
+* `/variations` - Generate more variants from your latest image result
+* `/draw [prompt]` - Legacy alias for `/imagine`
+* `/editimage [image] [prompt]` - Legacy alias for `/imagine` with image
 * `/reset` - Clear conversation history
 * `/help` - Display all available commands
 

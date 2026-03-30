@@ -1,7 +1,6 @@
 import os
 import logging
 import re
-import base64
 from typing import Dict, List, Optional, Any, Tuple
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -291,10 +290,10 @@ class OpenAIProvider(BaseProvider):
     async def generate_image(self, prompt: str, model: Optional[str] = None, **kwargs) -> str:
         try:
             response = await self.client.images.generate(
-                model=model or "dall-e-3",
+                model=model or "gpt-image-1",
                 prompt=prompt,
                 size=kwargs.get("size", "1024x1024"),
-                quality=kwargs.get("quality", "standard"),
+                quality=kwargs.get("quality", "auto"),
                 n=1
             )
             return response.data[0].url
@@ -303,51 +302,26 @@ class OpenAIProvider(BaseProvider):
             raise
 
     async def edit_image(self, image_bytes: bytes, prompt: str, model: Optional[str] = None, **kwargs) -> bytes:
-        try:
-            response = await self.client.images.edit(
-                model=model or "gpt-image-1",
-                image=("input.png", image_bytes, "image/png"),
-                prompt=prompt,
-                size=kwargs.get("size", "1024x1024"),
-                n=1,
-                response_format="b64_json",
-            )
-
-            if not response.data:
-                raise RuntimeError("OpenAI returned empty image edit response")
-
-            image_data = response.data[0]
-            if getattr(image_data, "b64_json", None):
-                return base64.b64decode(image_data.b64_json)
-
-            image_url = getattr(image_data, "url", None)
-            if image_url:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(image_url) as url_response:
-                        if url_response.status != 200:
-                            raise RuntimeError(f"Failed to download edited image: HTTP {url_response.status}")
-                        return await url_response.read()
-
-            raise RuntimeError("OpenAI did not return edited image content")
-        except Exception as e:
-            logger.error(f"OpenAI image editing error: {e}")
-            raise
+        raise NotImplementedError(
+            "Legacy image edit API is disabled. Use /imagine with an attached image for image-to-image flow."
+        )
     
     def get_available_models(self) -> List[ModelInfo]:
         return [
             ModelInfo("gpt-4o", ProviderType.OPENAI, "Most capable GPT-4 model", supports_vision=True),
             ModelInfo("gpt-4o-mini", ProviderType.OPENAI, "Affordable GPT-4 model", supports_vision=True),
+            ModelInfo("gpt-4.1", ProviderType.OPENAI, "Advanced reasoning and instruction following", supports_vision=True),
+            ModelInfo("gpt-4.1-mini", ProviderType.OPENAI, "Fast GPT-4.1 variant", supports_vision=True),
             ModelInfo("o1", ProviderType.OPENAI, "Reasoning model"),
             ModelInfo("o1-mini", ProviderType.OPENAI, "Smaller reasoning model"),
-            ModelInfo("dall-e-3", ProviderType.OPENAI, "DALL-E 3 image generation", supports_image_generation=True),
-            ModelInfo("dall-e-2", ProviderType.OPENAI, "DALL-E 2 image generation", supports_image_generation=True),
+            ModelInfo("gpt-image-1", ProviderType.OPENAI, "Modern image generation model", supports_image_generation=True),
         ]
     
     def supports_image_generation(self) -> bool:
         return True
 
     def supports_image_editing(self) -> bool:
-        return True
+        return False
 
 
 class ClaudeProvider(BaseProvider):

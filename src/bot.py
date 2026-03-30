@@ -1,17 +1,24 @@
 import os
 import asyncio
-import io
 import discord
 from discord import app_commands
 from typing import Optional
 
 from src.aclient import discordClient
+from src.discord_handler import DiscordImageHandler
 from src.providers import ProviderType
 from src import log, personas
 from src.log import logger
 
 
 def run_discord_bot():
+    image_handler: Optional[DiscordImageHandler] = None
+    try:
+        image_handler = DiscordImageHandler(discordClient)
+        image_handler.register_commands()
+    except Exception as init_error:
+        logger.warning(f"Image workflow disabled: {init_error}")
+
     @discordClient.event
     async def on_ready():
         await discordClient.send_start_prompt()
@@ -171,97 +178,25 @@ def run_discord_bot():
             ephemeral=True
         )
 
-    @discordClient.tree.command(name="draw", description="Generate an image")
+    @discordClient.tree.command(name="draw", description="Legacy alias for /imagine")
     async def draw(interaction: discord.Interaction, *, prompt: str):
-        # Input validation
-        if len(prompt) > 500:
+        if not image_handler:
             await interaction.response.send_message(
-                "❌ Prompt too long (max 500 characters)", 
+                "❌ Image pipeline is unavailable. Configure OPENAI_KEY.",
                 ephemeral=True
             )
             return
-        
-        prompt = prompt.strip()
-        if not prompt:
-            await interaction.response.send_message(
-                "❌ Please provide a prompt", 
-                ephemeral=True
-            )
-            return
-        
-        await interaction.response.defer()
-        
-        try:
-            # Generate image using current provider
-            image_url = await discordClient.generate_image(prompt)
-            
-            embed = discord.Embed(
-                title="🎨 Generated Image",
-                description=f"**Prompt:** {prompt}",
-                color=discord.Color.green()
-            )
-            embed.set_image(url=image_url)
-            
-            await interaction.followup.send(embed=embed)
-            
-        except Exception as e:
-            logger.error(f"Image generation error: {e}")
-            await interaction.followup.send(
-                f"❌ Failed to generate image: {str(e)}"
-            )
+        await image_handler.handle_imagine(interaction=interaction, prompt=prompt)
 
-    @discordClient.tree.command(name="editimage", description="Edit an uploaded image with AI")
+    @discordClient.tree.command(name="editimage", description="Legacy alias for /imagine with image")
     async def editimage(interaction: discord.Interaction, image: discord.Attachment, *, prompt: str):
-        if len(prompt) > 500:
+        if not image_handler:
             await interaction.response.send_message(
-                "❌ Prompt too long (max 500 characters)",
+                "❌ Image pipeline is unavailable. Configure OPENAI_KEY.",
                 ephemeral=True
             )
             return
-
-        prompt = prompt.strip()
-        if not prompt:
-            await interaction.response.send_message(
-                "❌ Please provide a prompt",
-                ephemeral=True
-            )
-            return
-
-        if image.content_type and not image.content_type.startswith("image/"):
-            await interaction.response.send_message(
-                "❌ Attachment must be an image file",
-                ephemeral=True
-            )
-            return
-
-        await interaction.response.defer()
-
-        try:
-            image_bytes = await image.read()
-            if not image_bytes:
-                await interaction.followup.send("❌ Uploaded image is empty")
-                return
-
-            edited_image_bytes = await discordClient.edit_image(image_bytes=image_bytes, prompt=prompt)
-            discord_file = discord.File(io.BytesIO(edited_image_bytes), filename="edited-image.png")
-
-            embed = discord.Embed(
-                title="🖼️ Edited Image",
-                description=f"**Prompt:** {prompt}",
-                color=discord.Color.green()
-            )
-            embed.set_image(url="attachment://edited-image.png")
-
-            await interaction.followup.send(embed=embed, file=discord_file)
-        except NotImplementedError:
-            await interaction.followup.send(
-                "❌ Current providers do not support image editing. Configure OpenAI and select it via `/provider`."
-            )
-        except Exception as e:
-            logger.error(f"Image edit error: {e}")
-            await interaction.followup.send(
-                f"❌ Failed to edit image: {str(e)}"
-            )
+        await image_handler.handle_imagine(interaction=interaction, prompt=prompt, image=image)
 
     @discordClient.tree.command(name="switchpersona", description="Switch AI personality")
     async def switchpersona(interaction: discord.Interaction, persona: str):
@@ -369,8 +304,10 @@ def run_discord_bot():
                 ("/provider", "Switch AI provider and model interactively")
             ]),
             ("🎨 **Image Generation**", [
-                ("/draw [prompt]", "Generate an image from text"),
-                ("/editimage [image] [prompt]", "Edit an uploaded image using prompt instructions")
+                ("/imagine [prompt] [image?]", "Enhance prompt and generate images"),
+                ("/variations", "Generate more variants from your latest result"),
+                ("/draw [prompt]", "Legacy alias for /imagine"),
+                ("/editimage [image] [prompt]", "Legacy alias for /imagine with image")
             ]),
             ("🎭 **Personas**", [
                 ("/switchpersona [name]", "Change AI personality"),
