@@ -551,7 +551,7 @@ class DiscordImageHandler:
     async def run_image_generation(self, prompt: str) -> List[GeneratedImage]:
         async def _task():
             return await self.image_generator.generate_images(
-                prompt=prompt,
+                prompt=self._build_generation_prompt(prompt),
                 image_count=self.default_image_count,
             )
 
@@ -573,9 +573,19 @@ class DiscordImageHandler:
             "Strict edit rules:\n"
             "- Keep the original image identity and preserve all fine details (textures, micro details, edges, lighting nuances).\n"
             "- Keep composition, camera framing, geometry, proportions, and object layout unchanged unless explicitly requested.\n"
+            "- Ensure all key subjects stay fully inside the frame with safe margins; avoid edge clipping or cut-off objects.\n"
             "- Apply only the requested edits and leave everything else intact.\n"
             "- If the request is about colors/palette, change only colors while preserving original materials and textures.\n"
             "- Do not add text, logos, watermarks, or new objects unless explicitly requested."
+        )
+
+    def _build_generation_prompt(self, user_prompt: str) -> str:
+        return (
+            f"{user_prompt.strip()}\n\n"
+            "Framing rules:\n"
+            "- Keep the main subject fully visible in frame.\n"
+            "- Leave safe margins around key objects.\n"
+            "- Avoid any cropping or cut-off objects unless explicitly requested."
         )
 
     def images_to_discord_files(self, images: List[GeneratedImage]) -> List[discord.File]:

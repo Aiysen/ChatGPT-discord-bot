@@ -22,7 +22,7 @@ class ImageGenerator:
         self.model = model or os.getenv("IMAGE_GENERATION_MODEL", "gpt-image-1")
         self.edit_model = os.getenv("IMAGE_EDIT_MODEL", "gpt-image-1.5")
         self.generation_size = self._resolve_generate_size(os.getenv("IMAGE_GENERATION_SIZE", "auto"))
-        self.edit_size = os.getenv("IMAGE_EDIT_SIZE", "auto").strip().lower()
+        self.edit_size = os.getenv("IMAGE_EDIT_SIZE", "match_input").strip().lower()
 
     async def generate_images(
         self,
