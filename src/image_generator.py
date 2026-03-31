@@ -19,7 +19,7 @@ class ImageGenerator:
     def __init__(self, api_key: str, model: Optional[str] = None):
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model or os.getenv("IMAGE_GENERATION_MODEL", "gpt-image-1")
-        self.edit_model = os.getenv("IMAGE_EDIT_MODEL", "gpt-image-1")
+        self.edit_model = os.getenv("IMAGE_EDIT_MODEL", "gpt-image-1.5")
 
     async def generate_images(
         self,
@@ -61,9 +61,13 @@ class ImageGenerator:
         image_bytes: bytes,
         prompt: str,
         image_count: int = 1,
-        size: str = "auto",
+        size: str = "1024x1024",
+        quality: str = "auto",
+        background: str = "auto",
+        moderation: str = "auto",
+        input_fidelity: str = "high",
     ) -> List[GeneratedImage]:
-        safe_count = max(1, min(image_count, 4))
+        safe_count = 1
         prepared_image_bytes = self._prepare_image_for_edit(image_bytes)
         image_file = io.BytesIO(prepared_image_bytes)
         image_file.name = "input.png"
@@ -74,6 +78,10 @@ class ImageGenerator:
             prompt=prompt,
             n=safe_count,
             size=size,
+            quality=quality,
+            background=background,
+            moderation=moderation,
+            input_fidelity=input_fidelity,
         )
 
         result: List[GeneratedImage] = []
