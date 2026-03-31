@@ -3,7 +3,7 @@ import io
 import os
 import time
 from collections import defaultdict, deque
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import discord
 from discord import app_commands
@@ -46,12 +46,14 @@ class VariationSelect(discord.ui.Select):
         original_prompt: str,
         owner_id: int,
         had_input_image: bool,
+        base_image_bytes: Optional[bytes] = None,
     ):
         self.workflow = workflow
         self.enhancement = enhancement
         self.original_prompt = original_prompt
         self.owner_id = owner_id
         self.had_input_image = had_input_image
+        self.base_image_bytes = base_image_bytes
 
         options = []
         for idx, prompt in enumerate(enhancement.variations[:4]):
@@ -76,8 +78,17 @@ class VariationSelect(discord.ui.Select):
         await interaction.response.defer(thinking=True)
 
         try:
-            images = await self.workflow.run_image_generation(selected_prompt)
+            if self.base_image_bytes:
+                effective_prompt = self.workflow._build_edit_prompt(selected_prompt)
+                images = await self.workflow.run_image_edit(effective_prompt, self.base_image_bytes)
+                chosen_prompt = effective_prompt
+                image_model = self.workflow.image_generator.edit_model
+            else:
+                images = await self.workflow.run_image_generation(selected_prompt)
+                chosen_prompt = selected_prompt
+                image_model = self.workflow.image_generator.model
             files = self.workflow.images_to_discord_files(images)
+            self.workflow._remember_last_user_image(interaction.user.id, images)
 
             self.workflow.history_store.save(
                 GenerationRecord(
@@ -86,11 +97,11 @@ class VariationSelect(discord.ui.Select):
                     original_prompt=self.original_prompt,
                     final_prompt=self.enhancement.final_prompt,
                     variations=self.enhancement.variations,
-                    chosen_prompt=selected_prompt,
+                    chosen_prompt=chosen_prompt,
                     prompt_model=self.enhancement.model,
-                    image_model=self.workflow.image_generator.model,
+                    image_model=image_model,
                     image_count=len(images),
-                    had_input_image=self.had_input_image,
+                    had_input_image=self.base_image_bytes is not None,
                 )
             )
 
@@ -111,6 +122,7 @@ class VariationView(discord.ui.View):
         original_prompt: str,
         owner_id: int,
         had_input_image: bool,
+        base_image_bytes: Optional[bytes] = None,
     ):
         super().__init__(timeout=600)
         self.add_item(
@@ -120,6 +132,7 @@ class VariationView(discord.ui.View):
                 original_prompt=original_prompt,
                 owner_id=owner_id,
                 had_input_image=had_input_image,
+                base_image_bytes=base_image_bytes,
             )
         )
 
@@ -128,7 +141,7 @@ class DiscordImageHandler:
     def __init__(self, discord_client: discord.Client):
         api_key = os.getenv("OPENAI_KEY")
         if not api_key:
-            raise RuntimeError("OPENAI_KEY is required for /imagine and /variations commands")
+            raise RuntimeError("OPENAI_KEY is required for image commands (/imagine, /variations, /refine_last)")
 
         self.discord_client = discord_client
         self.prompt_enhancer = PromptEnhancer(api_key=api_key)
@@ -144,6 +157,7 @@ class DiscordImageHandler:
         self.default_edit_image_count = int(os.getenv("EDIT_IMAGE_COUNT", "1"))
         self._task_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
+        self._last_image_by_user: Dict[int, bytes] = {}
 
     def register_commands(self):
         @self.discord_client.tree.command(name="imagine", description="Сгенерировать изображение по промту")
@@ -163,6 +177,14 @@ class DiscordImageHandler:
         @self.discord_client.tree.command(name="variations", description="Сгенерировать новые вариации последнего изображения")
         async def variations(interaction: discord.Interaction):
             await self.handle_variations(interaction)
+
+        @self.discord_client.tree.command(
+            name="refine_last",
+            description="Доработать последний результат с дополнительным текстовым промтом",
+        )
+        @app_commands.describe(prompt="Что именно нужно доработать в последнем результате")
+        async def refine_last(interaction: discord.Interaction, prompt: str):
+            await self.handle_refine_last(interaction=interaction, prompt=prompt)
 
     async def handle_imagine(
         self,
@@ -210,6 +232,7 @@ class DiscordImageHandler:
             )
             images = await self.run_image_generation(enhancement.final_prompt)
             files = self.images_to_discord_files(images)
+            self._remember_last_user_image(interaction.user.id, images)
 
             self.history_store.save(
                 GenerationRecord(
@@ -266,6 +289,7 @@ class DiscordImageHandler:
         try:
             images = await self.run_image_generation(clean_prompt)
             files = self.images_to_discord_files(images)
+            self._remember_last_user_image(interaction.user.id, images)
 
             self.history_store.save(
                 GenerationRecord(
@@ -322,6 +346,7 @@ class DiscordImageHandler:
             effective_prompt = self._build_edit_prompt(clean_prompt)
             images = await self.run_image_edit(effective_prompt, image_bytes)
             files = self.images_to_discord_files(images)
+            self._remember_last_user_image(interaction.user.id, images)
 
             self.history_store.save(
                 GenerationRecord(
@@ -365,15 +390,30 @@ class DiscordImageHandler:
 
         await interaction.response.defer(thinking=True)
         try:
+            last_image_bytes = self._last_image_by_user.get(interaction.user.id)
             request_text = (
-                "Create 4 meaningful prompt variations for this base prompt. "
-                "Keep subject and composition close, but vary rendering approach, materials and lighting:\n"
+                "Create 4 meaningful prompt variations for regenerating the previous result. "
+                "Keep subject and composition close, vary rendering approach, materials and lighting, "
+                "and preserve recognizable identity of the last output:\n"
                 f"{record.chosen_prompt}"
             )
-            enhancement = await self.run_prompt_enhancement(user_prompt=request_text, image_bytes=None, style_preset=None)
+            enhancement = await self.run_prompt_enhancement(
+                user_prompt=request_text,
+                image_bytes=last_image_bytes,
+                style_preset=None,
+            )
             selected_prompt = enhancement.variations[0]
-            images = await self.run_image_generation(selected_prompt)
+            if last_image_bytes:
+                effective_prompt = self._build_edit_prompt(selected_prompt)
+                images = await self.run_image_edit(effective_prompt, last_image_bytes)
+                saved_chosen_prompt = effective_prompt
+                image_model = self.image_generator.edit_model
+            else:
+                images = await self.run_image_generation(selected_prompt)
+                saved_chosen_prompt = selected_prompt
+                image_model = self.image_generator.model
             files = self.images_to_discord_files(images)
+            self._remember_last_user_image(interaction.user.id, images)
 
             self.history_store.save(
                 GenerationRecord(
@@ -382,11 +422,11 @@ class DiscordImageHandler:
                     original_prompt=record.original_prompt,
                     final_prompt=record.final_prompt,
                     variations=enhancement.variations,
-                    chosen_prompt=selected_prompt,
+                    chosen_prompt=saved_chosen_prompt,
                     prompt_model=enhancement.model,
-                    image_model=self.image_generator.model,
+                    image_model=image_model,
                     image_count=len(images),
-                    had_input_image=record.had_input_image,
+                    had_input_image=last_image_bytes is not None,
                 )
             )
 
@@ -395,10 +435,14 @@ class DiscordImageHandler:
                 enhancement=enhancement,
                 original_prompt=record.original_prompt,
                 owner_id=interaction.user.id,
-                had_input_image=record.had_input_image,
+                had_input_image=last_image_bytes is not None,
+                base_image_bytes=last_image_bytes,
             )
             await interaction.followup.send(
-                content=f"Сгенерированы новые вариации на базе последнего результата.\nБазовый вариант:\n`{selected_prompt[:700]}`",
+                content=(
+                    "Сгенерированы новые вариации на базе последнего результата.\n"
+                    f"Базовый вариант:\n`{selected_prompt[:700]}`"
+                ),
                 files=files,
                 view=view,
             )
@@ -407,6 +451,87 @@ class DiscordImageHandler:
         except Exception as exc:
             logger.exception(f"/variations failed: {exc}")
             await interaction.followup.send(f"❌ Ошибка вариаций: {exc}")
+
+    async def handle_refine_last(self, interaction: discord.Interaction, prompt: str):
+        clean_prompt = (prompt or "").strip()
+        if not clean_prompt:
+            await interaction.response.send_message("❌ Укажите prompt с доработками.", ephemeral=True)
+            return
+        if len(clean_prompt) > 1000:
+            await interaction.response.send_message("❌ Prompt слишком длинный (макс. 1000 символов).", ephemeral=True)
+            return
+
+        record = self.history_store.get_last(interaction.user.id)
+        if not record:
+            await interaction.response.send_message("❌ Нет истории. Сначала используйте `/imagine`.", ephemeral=True)
+            return
+
+        last_image_bytes = self._last_image_by_user.get(interaction.user.id)
+        if not last_image_bytes:
+            await interaction.response.send_message(
+                "❌ Не найдено последнее изображение в памяти. Сначала сгенерируйте новую картинку и повторите.",
+                ephemeral=True,
+            )
+            return
+
+        allowed, error_text = self.rate_limiter.is_allowed(interaction.user.id)
+        if not allowed:
+            await interaction.response.send_message(f"❌ {error_text}", ephemeral=True)
+            return
+
+        await interaction.response.defer(thinking=True)
+        try:
+            request_text = (
+                "Refine this previous image with minimal targeted changes.\n"
+                f"Previous prompt:\n{record.chosen_prompt}\n\n"
+                f"Requested refinements:\n{clean_prompt}"
+            )
+            enhancement = await self.run_prompt_enhancement(
+                user_prompt=request_text,
+                image_bytes=last_image_bytes,
+                style_preset=None,
+            )
+            effective_prompt = self._build_edit_prompt(enhancement.final_prompt)
+            images = await self.run_image_edit(effective_prompt, last_image_bytes)
+            files = self.images_to_discord_files(images)
+            self._remember_last_user_image(interaction.user.id, images)
+
+            self.history_store.save(
+                GenerationRecord(
+                    user_id=interaction.user.id,
+                    username=str(interaction.user),
+                    original_prompt=record.original_prompt,
+                    final_prompt=enhancement.final_prompt,
+                    variations=enhancement.variations,
+                    chosen_prompt=effective_prompt,
+                    prompt_model=enhancement.model,
+                    image_model=self.image_generator.edit_model,
+                    image_count=len(images),
+                    had_input_image=True,
+                )
+            )
+
+            view = VariationView(
+                workflow=self,
+                enhancement=enhancement,
+                original_prompt=record.original_prompt,
+                owner_id=interaction.user.id,
+                had_input_image=True,
+                base_image_bytes=last_image_bytes,
+            )
+            await interaction.followup.send(
+                content=(
+                    f"Доработка последнего результата выполнена.\nВаш запрос:\n`{clean_prompt[:700]}`\n\n"
+                    f"Использован улучшенный prompt:\n`{enhancement.final_prompt[:700]}`"
+                ),
+                files=files,
+                view=view,
+            )
+        except asyncio.TimeoutError:
+            await interaction.followup.send("❌ Таймаут доработки изображения.")
+        except Exception as exc:
+            logger.exception(f"/refine_last failed: {exc}")
+            await interaction.followup.send(f"❌ Ошибка refine_last: {exc}")
 
     async def run_prompt_enhancement(
         self,
@@ -459,6 +584,10 @@ class DiscordImageHandler:
             filename = f"imagine_{index}.png"
             files.append(discord.File(io.BytesIO(image.image_bytes), filename=filename))
         return files
+
+    def _remember_last_user_image(self, user_id: int, images: List[GeneratedImage]) -> None:
+        if images:
+            self._last_image_by_user[user_id] = images[0].image_bytes
 
     def _ensure_workers(self) -> None:
         if self._workers:

@@ -111,6 +111,9 @@ Behavior:
 - Prompt is always enhanced before generation
 - If image is attached, enhancer preserves composition and modifies only requested parts
 - Bot returns multiple images and prompt alternatives in a selector UI
+- Aspect ratio control via env:
+  - `IMAGE_GENERATION_SIZE` (`auto`, `1024x1024`, `1536x1024`, `1024x1536`)
+  - `IMAGE_EDIT_SIZE` (`auto`, `match_input` or fixed size); `match_input` keeps source orientation to avoid forced square crops
 
 ## Optional: Setup system prompt
 
@@ -139,6 +142,7 @@ Behavior:
 * `/variations` - Generate more variants from your latest image result
 * `/draw [prompt]` - Legacy alias for `/imagine`
 * `/editimage [image] [prompt]` - Edit attached image directly (image-to-image, multiple variants)
+* `/refine_last [prompt]` - Refine your latest generated result with a follow-up text prompt
 * `/reset` - Clear conversation history
 * `/help` - Display all available commands
 

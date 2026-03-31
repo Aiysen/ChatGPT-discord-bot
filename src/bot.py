@@ -307,7 +307,8 @@ def run_discord_bot():
                 ("/imagine [prompt] [image?] [style_preset?]", "Сначала улучшает prompt, затем генерирует изображение"),
                 ("/draw [prompt]", "Генерирует напрямую по вашему prompt без улучшения"),
                 ("/editimage [image] [prompt]", "Редактирует именно присланное изображение через модель image-edit"),
-                ("/variations", "Создаёт новые вариации на базе последнего результата")
+                ("/variations", "Пытается перегенерировать последнюю работу, сохраняя композицию"),
+                ("/refine_last [prompt]", "Дорабатывает последний результат с текстовым описанием правок")
             ]),
             ("🎭 **Personas**", [
                 ("/switchpersona [name]", "Change AI personality"),
@@ -315,7 +316,7 @@ def run_discord_bot():
                 ("Admin Only", "jailbreak-v1, jailbreak-v2, jailbreak-v3 (restricted)")
             ]),
             ("⚙️ **Режимы**", [
-                ("Важно", "/imagine использует улучшение prompt, /draw не использует улучшение, /editimage изменяет входное изображение"),
+                ("Важно", "/refine_last и /variations работают от последнего результата; /editimage редактирует прикрепленное изображение"),
             ]),
             ("⚙️ **Настройки**", [
                 ("/private", "Toggle private/public responses"),

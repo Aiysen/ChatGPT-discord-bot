@@ -21,22 +21,27 @@ class ImageGenerator:
         self.client = AsyncOpenAI(api_key=api_key)
         self.model = model or os.getenv("IMAGE_GENERATION_MODEL", "gpt-image-1")
         self.edit_model = os.getenv("IMAGE_EDIT_MODEL", "gpt-image-1.5")
+        self.generation_size = self._resolve_generate_size(os.getenv("IMAGE_GENERATION_SIZE", "auto"))
+        self.edit_size = os.getenv("IMAGE_EDIT_SIZE", "auto").strip().lower()
 
     async def generate_images(
         self,
         prompt: str,
         image_count: int = 1,
-        size: str = "1024x1024",
+        size: Optional[str] = None,
         quality: str = "auto",
     ) -> List[GeneratedImage]:
         safe_count = max(1, min(image_count, 4))
-        response = await self.client.images.generate(
-            model=self.model,
-            prompt=prompt,
-            n=safe_count,
-            size=size,
-            quality=quality,
-        )
+        requested_size = size or self.generation_size
+        generate_kwargs = {
+            "model": self.model,
+            "prompt": prompt,
+            "n": safe_count,
+            "quality": quality,
+        }
+        if requested_size != "auto":
+            generate_kwargs["size"] = requested_size
+        response = await self.client.images.generate(**generate_kwargs)
 
         result: List[GeneratedImage] = []
         for item in response.data:
@@ -62,13 +67,14 @@ class ImageGenerator:
         image_bytes: bytes,
         prompt: str,
         image_count: int = 1,
-        size: str = "1024x1024",
+        size: Optional[str] = None,
         quality: str = "auto",
         background: str = "auto",
         moderation: str = "auto",
         input_fidelity: str = "high",
     ) -> List[GeneratedImage]:
         safe_count = 1
+        requested_size = self._resolve_edit_size(size=size, image_bytes=image_bytes)
         prepared_image_bytes = self._prepare_image_for_edit(image_bytes)
         image_file = io.BytesIO(prepared_image_bytes)
         image_file.name = "input.png"
@@ -81,14 +87,16 @@ class ImageGenerator:
         }
         edit_kwargs = self._filter_supported_image_edit_kwargs(optional_kwargs)
 
-        response = await self.client.images.edit(
-            model=self.edit_model,
-            image=image_file,
-            prompt=prompt,
-            n=safe_count,
-            size=size,
+        edit_request_kwargs = {
+            "model": self.edit_model,
+            "image": image_file,
+            "prompt": prompt,
+            "n": safe_count,
             **edit_kwargs,
-        )
+        }
+        if requested_size != "auto":
+            edit_request_kwargs["size"] = requested_size
+        response = await self.client.images.edit(**edit_request_kwargs)
 
         result: List[GeneratedImage] = []
         for item in response.data:
@@ -135,3 +143,25 @@ class ImageGenerator:
             return {}
 
         return {key: value for key, value in options.items() if key in params}
+
+    def _resolve_generate_size(self, size: str) -> str:
+        normalized = (size or "").strip().lower()
+        if normalized in {"auto", "1024x1024", "1536x1024", "1024x1536"}:
+            return normalized
+        return "auto"
+
+    def _resolve_edit_size(self, size: Optional[str], image_bytes: bytes) -> str:
+        if size:
+            return self._resolve_generate_size(size)
+        if self.edit_size == "match_input":
+            return self._size_from_input_aspect(image_bytes)
+        return self._resolve_generate_size(self.edit_size)
+
+    def _size_from_input_aspect(self, image_bytes: bytes) -> str:
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            width, height = source.size
+        if width > height:
+            return "1536x1024"
+        if height > width:
+            return "1024x1536"
+        return "1024x1024"
