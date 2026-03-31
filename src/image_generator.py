@@ -1,4 +1,5 @@
 import base64
+import inspect
 import io
 import os
 from dataclasses import dataclass
@@ -72,16 +73,21 @@ class ImageGenerator:
         image_file = io.BytesIO(prepared_image_bytes)
         image_file.name = "input.png"
 
+        optional_kwargs = {
+            "quality": quality,
+            "background": background,
+            "moderation": moderation,
+            "input_fidelity": input_fidelity,
+        }
+        edit_kwargs = self._filter_supported_image_edit_kwargs(optional_kwargs)
+
         response = await self.client.images.edit(
             model=self.edit_model,
             image=image_file,
             prompt=prompt,
             n=safe_count,
             size=size,
-            quality=quality,
-            background=background,
-            moderation=moderation,
-            input_fidelity=input_fidelity,
+            **edit_kwargs,
         )
 
         result: List[GeneratedImage] = []
@@ -120,3 +126,12 @@ class ImageGenerator:
             output = io.BytesIO()
             normalized.save(output, format="PNG")
             return output.getvalue()
+
+    def _filter_supported_image_edit_kwargs(self, options: dict) -> dict:
+        """Keep only kwargs supported by current images.edit SDK signature."""
+        try:
+            params = inspect.signature(self.client.images.edit).parameters
+        except (TypeError, ValueError):
+            return {}
+
+        return {key: value for key, value in options.items() if key in params}
