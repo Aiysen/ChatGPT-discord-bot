@@ -61,7 +61,7 @@ class ImageGenerator:
         image_bytes: bytes,
         prompt: str,
         image_count: int = 1,
-        size: str = "1024x1024",
+        size: str = "auto",
     ) -> List[GeneratedImage]:
         safe_count = max(1, min(image_count, 4))
         prepared_image_bytes = self._prepare_image_for_edit(image_bytes)

@@ -141,7 +141,7 @@ class DiscordImageHandler:
         self._worker_count = int(os.getenv("IMAGE_CONCURRENCY", "2"))
         self.task_timeout_seconds = int(os.getenv("IMAGE_TASK_TIMEOUT_SECONDS", "90"))
         self.default_image_count = int(os.getenv("IMAGINE_IMAGE_COUNT", "2"))
-        self.default_edit_image_count = int(os.getenv("EDIT_IMAGE_COUNT", "4"))
+        self.default_edit_image_count = int(os.getenv("EDIT_IMAGE_COUNT", "1"))
         self._task_queue: asyncio.Queue = asyncio.Queue()
         self._workers: List[asyncio.Task] = []
 
@@ -446,11 +446,11 @@ class DiscordImageHandler:
         return (
             f"{user_prompt.strip()}\n\n"
             "Strict edit rules:\n"
-            "- Apply visible edits exactly as requested.\n"
-            "- Never return an unchanged copy of the input image.\n"
-            "- Keep composition, shape, geometry, and object identity unchanged unless explicitly requested.\n"
-            "- If the request is about colors/palette, change only colors and do not use the original palette.\n"
-            "- Do not add text, logos, or new objects."
+            "- Keep the original image identity and preserve all fine details (textures, micro details, edges, lighting nuances).\n"
+            "- Keep composition, camera framing, geometry, proportions, and object layout unchanged unless explicitly requested.\n"
+            "- Apply only the requested edits and leave everything else intact.\n"
+            "- If the request is about colors/palette, change only colors while preserving original materials and textures.\n"
+            "- Do not add text, logos, watermarks, or new objects unless explicitly requested."
         )
 
     def images_to_discord_files(self, images: List[GeneratedImage]) -> List[discord.File]:
