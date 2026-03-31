@@ -481,17 +481,7 @@ class DiscordImageHandler:
 
         await interaction.response.defer(thinking=True)
         try:
-            request_text = (
-                "Refine this previous image with minimal targeted changes.\n"
-                f"Previous prompt:\n{record.chosen_prompt}\n\n"
-                f"Requested refinements:\n{clean_prompt}"
-            )
-            enhancement = await self.run_prompt_enhancement(
-                user_prompt=request_text,
-                image_bytes=last_image_bytes,
-                style_preset=None,
-            )
-            effective_prompt = self._build_edit_prompt(enhancement.final_prompt)
+            effective_prompt = self._build_edit_prompt(clean_prompt)
             images = await self.run_image_edit(effective_prompt, last_image_bytes)
             files = self.images_to_discord_files(images)
             self._remember_last_user_image(interaction.user.id, images)
@@ -501,31 +491,21 @@ class DiscordImageHandler:
                     user_id=interaction.user.id,
                     username=str(interaction.user),
                     original_prompt=record.original_prompt,
-                    final_prompt=enhancement.final_prompt,
-                    variations=enhancement.variations,
+                    final_prompt=effective_prompt,
+                    variations=[clean_prompt, effective_prompt],
                     chosen_prompt=effective_prompt,
-                    prompt_model=enhancement.model,
+                    prompt_model="none",
                     image_model=self.image_generator.edit_model,
                     image_count=len(images),
                     had_input_image=True,
                 )
             )
-
-            view = VariationView(
-                workflow=self,
-                enhancement=enhancement,
-                original_prompt=record.original_prompt,
-                owner_id=interaction.user.id,
-                had_input_image=True,
-                base_image_bytes=last_image_bytes,
-            )
             await interaction.followup.send(
                 content=(
                     f"Доработка последнего результата выполнена.\nВаш запрос:\n`{clean_prompt[:700]}`\n\n"
-                    f"Использован улучшенный prompt:\n`{enhancement.final_prompt[:700]}`"
+                    f"Применен прямой prompt без улучшения:\n`{clean_prompt[:700]}`"
                 ),
                 files=files,
-                view=view,
             )
         except asyncio.TimeoutError:
             await interaction.followup.send("❌ Таймаут доработки изображения.")
