@@ -287,7 +287,8 @@ class DiscordImageHandler:
 
         await interaction.response.defer(thinking=True)
         try:
-            images = await self.run_image_generation(clean_prompt)
+            draw_model = "gpt-image-1.5"
+            images = await self.run_image_generation(clean_prompt, model=draw_model)
             files = self.images_to_discord_files(images)
             self._remember_last_user_image(interaction.user.id, images)
 
@@ -300,7 +301,7 @@ class DiscordImageHandler:
                     variations=[clean_prompt],
                     chosen_prompt=clean_prompt,
                     prompt_model="none",
-                    image_model=self.image_generator.model,
+                    image_model=draw_model,
                     image_count=len(images),
                     had_input_image=False,
                 )
@@ -309,7 +310,7 @@ class DiscordImageHandler:
             await interaction.followup.send(
                 content=(
                     f"Сгенерировано без улучшения промта:\n`{clean_prompt[:700]}`\n\n"
-                    f"Модель генерации: `{self.image_generator.model}`"
+                    f"Модель генерации: `{draw_model}`"
                 ),
                 files=files,
             )
@@ -528,11 +529,12 @@ class DiscordImageHandler:
 
         return await self._run_in_queue(_task)
 
-    async def run_image_generation(self, prompt: str) -> List[GeneratedImage]:
+    async def run_image_generation(self, prompt: str, model: Optional[str] = None) -> List[GeneratedImage]:
         async def _task():
             return await self.image_generator.generate_images(
                 prompt=self._build_generation_prompt(prompt),
                 image_count=self.default_image_count,
+                model=model,
             )
 
         return await self._run_in_queue(_task)

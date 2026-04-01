@@ -30,11 +30,12 @@ class ImageGenerator:
         image_count: int = 1,
         size: Optional[str] = None,
         quality: str = "auto",
+        model: Optional[str] = None,
     ) -> List[GeneratedImage]:
         safe_count = max(1, min(image_count, 4))
         requested_size = size or self.generation_size
         generate_kwargs = {
-            "model": self.model,
+            "model": model or self.model,
             "prompt": prompt,
             "n": safe_count,
             "quality": quality,
