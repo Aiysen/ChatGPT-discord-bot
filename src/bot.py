@@ -188,6 +188,19 @@ def run_discord_bot():
             return
         await image_handler.handle_draw(interaction=interaction, prompt=prompt)
 
+    @discordClient.tree.command(
+        name="skill_ico",
+        description="Генерация иконки навыка 100x100 с черным фоном и без прозрачности",
+    )
+    async def skill_ico(interaction: discord.Interaction, *, prompt: str):
+        if not image_handler:
+            await interaction.response.send_message(
+                "❌ Image pipeline is unavailable. Configure OPENAI_KEY.",
+                ephemeral=True
+            )
+            return
+        await image_handler.handle_skill_ico(interaction=interaction, prompt=prompt)
+
     @discordClient.tree.command(name="editimage", description="Редактирование присланного изображения (image-to-image)")
     async def editimage(interaction: discord.Interaction, image: discord.Attachment, *, prompt: str):
         if not image_handler:
@@ -306,6 +319,7 @@ def run_discord_bot():
             ("🎨 **Генерация изображений**", [
                 ("/imagine [prompt] [image?] [style_preset?]", "Сначала улучшает prompt, затем генерирует изображение"),
                 ("/draw [prompt]", "Генерирует напрямую по вашему prompt без улучшения"),
+                ("/skill_ico [prompt]", "Иконка навыка 100x100, черный фон, без прозрачности"),
                 ("/editimage [image] [prompt]", "Редактирует именно присланное изображение через модель image-edit"),
                 ("/variations", "Пытается перегенерировать последнюю работу, сохраняя композицию"),
                 ("/refine_last [prompt]", "Дорабатывает последний результат с текстовым описанием правок")

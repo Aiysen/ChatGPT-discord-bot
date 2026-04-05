@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 import discord
 from discord import app_commands
+from PIL import Image
 
 from src.history_store import GenerationRecord, HistoryStore
 from src.image_generator import GeneratedImage, ImageGenerator
@@ -320,6 +321,57 @@ class DiscordImageHandler:
             logger.exception(f"/draw failed: {exc}")
             await interaction.followup.send(f"❌ Ошибка генерации: {exc}")
 
+    async def handle_skill_ico(self, interaction: discord.Interaction, prompt: str):
+        clean_prompt = (prompt or "").strip()
+        if not clean_prompt:
+            await interaction.response.send_message("❌ Укажите prompt.", ephemeral=True)
+            return
+        if len(clean_prompt) > 1000:
+            await interaction.response.send_message("❌ Prompt слишком длинный (макс. 1000 символов).", ephemeral=True)
+            return
+
+        allowed, error_text = self.rate_limiter.is_allowed(interaction.user.id)
+        if not allowed:
+            await interaction.response.send_message(f"❌ {error_text}", ephemeral=True)
+            return
+
+        await interaction.response.defer(thinking=True)
+        try:
+            skill_model = "gpt-image-1.5"
+            effective_prompt = self._build_skill_icon_prompt(clean_prompt)
+            images = await self.run_image_generation(effective_prompt, model=skill_model, image_count=1)
+            icon_images = self._convert_images_to_skill_icons(images)
+            files = self.images_to_discord_files(icon_images, filename_prefix="skill_ico")
+            self._remember_last_user_image(interaction.user.id, icon_images)
+
+            self.history_store.save(
+                GenerationRecord(
+                    user_id=interaction.user.id,
+                    username=str(interaction.user),
+                    original_prompt=clean_prompt,
+                    final_prompt=effective_prompt,
+                    variations=[effective_prompt],
+                    chosen_prompt=effective_prompt,
+                    prompt_model="none",
+                    image_model=skill_model,
+                    image_count=len(icon_images),
+                    had_input_image=False,
+                )
+            )
+
+            await interaction.followup.send(
+                content=(
+                    f"Иконка навыка сгенерирована:\n`{clean_prompt[:700]}`\n\n"
+                    "Формат: `100x100`, фон: `black`, без прозрачности."
+                ),
+                files=files,
+            )
+        except asyncio.TimeoutError:
+            await interaction.followup.send("❌ Таймаут обработки запроса. Попробуйте снова.")
+        except Exception as exc:
+            logger.exception(f"/skill_ico failed: {exc}")
+            await interaction.followup.send(f"❌ Ошибка генерации skill_ico: {exc}")
+
     async def handle_editimage(self, interaction: discord.Interaction, image: discord.Attachment, prompt: str):
         clean_prompt = (prompt or "").strip()
         if not clean_prompt:
@@ -529,11 +581,16 @@ class DiscordImageHandler:
 
         return await self._run_in_queue(_task)
 
-    async def run_image_generation(self, prompt: str, model: Optional[str] = None) -> List[GeneratedImage]:
+    async def run_image_generation(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        image_count: Optional[int] = None,
+    ) -> List[GeneratedImage]:
         async def _task():
             return await self.image_generator.generate_images(
                 prompt=self._build_generation_prompt(prompt),
-                image_count=self.default_image_count,
+                image_count=image_count if image_count is not None else self.default_image_count,
                 model=model,
             )
 
@@ -570,10 +627,46 @@ class DiscordImageHandler:
             "- Avoid any cropping or cut-off objects unless explicitly requested."
         )
 
-    def images_to_discord_files(self, images: List[GeneratedImage]) -> List[discord.File]:
+    def _build_skill_icon_prompt(self, user_prompt: str) -> str:
+        return (
+            f"{user_prompt.strip()}\n\n"
+            "Skill icon rules:\n"
+            "- Generate a game-style skill icon with bold, readable silhouette.\n"
+            "- Fill the frame with the main subject; avoid tiny centered objects.\n"
+            "- Background must be solid black.\n"
+            "- No transparency, no alpha holes, fully opaque render.\n"
+            "- High contrast and clean edges suitable for small icon usage.\n"
+            "- No text, letters, logos, or watermarks."
+        )
+
+    def _convert_images_to_skill_icons(self, images: List[GeneratedImage]) -> List[GeneratedImage]:
+        converted: List[GeneratedImage] = []
+        for image in images:
+            converted.append(
+                GeneratedImage(
+                    image_bytes=self._convert_to_100x100_black_background(image.image_bytes),
+                    revised_prompt=image.revised_prompt,
+                )
+            )
+        return converted
+
+    def _convert_to_100x100_black_background(self, image_bytes: bytes) -> bytes:
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            rgba = source.convert("RGBA")
+            composed = Image.new("RGB", rgba.size, (0, 0, 0))
+            composed.paste(rgba, mask=rgba.getchannel("A"))
+            if hasattr(Image, "Resampling"):
+                resized = composed.resize((100, 100), Image.Resampling.LANCZOS)
+            else:
+                resized = composed.resize((100, 100), Image.LANCZOS)
+            output = io.BytesIO()
+            resized.save(output, format="PNG")
+            return output.getvalue()
+
+    def images_to_discord_files(self, images: List[GeneratedImage], filename_prefix: str = "imagine") -> List[discord.File]:
         files: List[discord.File] = []
         for index, image in enumerate(images, start=1):
-            filename = f"imagine_{index}.png"
+            filename = f"{filename_prefix}_{index}.png"
             files.append(discord.File(io.BytesIO(image.image_bytes), filename=filename))
         return files
 
