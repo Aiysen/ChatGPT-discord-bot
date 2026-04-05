@@ -3,7 +3,7 @@ import io
 import os
 import time
 from collections import defaultdict, deque
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import discord
 from discord import app_commands
@@ -632,7 +632,10 @@ class DiscordImageHandler:
             f"{user_prompt.strip()}\n\n"
             "Skill icon rules:\n"
             "- Generate a game-style skill icon with bold, readable silhouette.\n"
-            "- Fill the frame with the main subject; avoid tiny centered objects.\n"
+            "- The skill art must fill the entire frame; avoid tiny centered objects.\n"
+            "- Subject must touch or nearly touch all 4 edges of the frame.\n"
+            "- No empty margins, no border, no vignette around the subject.\n"
+            "- Do not leave visible background; the skill effect should occupy the full canvas.\n"
             "- Background must be solid black.\n"
             "- No transparency, no alpha holes, fully opaque render.\n"
             "- High contrast and clean edges suitable for small icon usage.\n"
@@ -653,15 +656,79 @@ class DiscordImageHandler:
     def _convert_to_100x100_black_background(self, image_bytes: bytes) -> bytes:
         with Image.open(io.BytesIO(image_bytes)) as source:
             rgba = source.convert("RGBA")
+            content_bbox = self._detect_icon_content_bbox(rgba)
+            if content_bbox:
+                rgba = rgba.crop(content_bbox)
+
             composed = Image.new("RGB", rgba.size, (0, 0, 0))
             composed.paste(rgba, mask=rgba.getchannel("A"))
-            if hasattr(Image, "Resampling"):
-                resized = composed.resize((100, 100), Image.Resampling.LANCZOS)
-            else:
-                resized = composed.resize((100, 100), Image.LANCZOS)
+            composed = self._resize_cover(composed, (100, 100))
             output = io.BytesIO()
-            resized.save(output, format="PNG")
+            composed.save(output, format="PNG")
             return output.getvalue()
+
+    def _detect_icon_content_bbox(self, rgba: Image.Image) -> Optional[Tuple[int, int, int, int]]:
+        width, height = rgba.size
+        min_w = max(8, int(width * 0.2))
+        min_h = max(8, int(height * 0.2))
+
+        alpha_mask = rgba.getchannel("A").point(lambda value: 255 if value > 20 else 0)
+        alpha_bbox = alpha_mask.getbbox()
+        if self._is_valid_bbox(alpha_bbox, min_w=min_w, min_h=min_h):
+            return self._expand_bbox(alpha_bbox, width=width, height=height, pad_ratio=0.03)
+
+        rgb_mask = rgba.convert("RGB").point(lambda value: 255 if value > 18 else 0)
+        rgb_bbox = rgb_mask.getbbox()
+        if self._is_valid_bbox(rgb_bbox, min_w=min_w, min_h=min_h):
+            return self._expand_bbox(rgb_bbox, width=width, height=height, pad_ratio=0.02)
+
+        return None
+
+    def _is_valid_bbox(
+        self,
+        bbox: Optional[Tuple[int, int, int, int]],
+        min_w: int,
+        min_h: int,
+    ) -> bool:
+        if not bbox:
+            return False
+        left, top, right, bottom = bbox
+        return (right - left) >= min_w and (bottom - top) >= min_h
+
+    def _expand_bbox(
+        self,
+        bbox: Tuple[int, int, int, int],
+        width: int,
+        height: int,
+        pad_ratio: float,
+    ) -> Tuple[int, int, int, int]:
+        left, top, right, bottom = bbox
+        pad_x = max(1, int((right - left) * pad_ratio))
+        pad_y = max(1, int((bottom - top) * pad_ratio))
+        return (
+            max(0, left - pad_x),
+            max(0, top - pad_y),
+            min(width, right + pad_x),
+            min(height, bottom + pad_y),
+        )
+
+    def _resize_cover(self, image: Image.Image, target_size: Tuple[int, int]) -> Image.Image:
+        target_w, target_h = target_size
+        src_w, src_h = image.size
+        if src_w == 0 or src_h == 0:
+            return image.resize(target_size)
+
+        scale = max(target_w / src_w, target_h / src_h)
+        resized_w = max(1, int(round(src_w * scale)))
+        resized_h = max(1, int(round(src_h * scale)))
+        if hasattr(Image, "Resampling"):
+            resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
+        else:
+            resized = image.resize((resized_w, resized_h), Image.LANCZOS)
+
+        left = max(0, (resized_w - target_w) // 2)
+        top = max(0, (resized_h - target_h) // 2)
+        return resized.crop((left, top, left + target_w, top + target_h))
 
     def images_to_discord_files(self, images: List[GeneratedImage], filename_prefix: str = "imagine") -> List[discord.File]:
         files: List[discord.File] = []
